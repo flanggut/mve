@@ -30,8 +30,7 @@ RansacPoseP3P::estimate (Correspondences2D3D const& corresp,
     if (this->opts.verbose_output)
     {
         std::cout << "RANSAC-3: Running for " << this->opts.max_iterations
-            << " iterations, threshold " << this->opts.threshold
-            << "..." << std::endl;
+            << " iterations " << "..." << std::endl;
     }
 
     /* Pre-compute inverse K matrix to compute directions from corresp. */
@@ -40,6 +39,15 @@ RansacPoseP3P::estimate (Correspondences2D3D const& corresp,
 
 #pragma omp parallel
     {
+        NFAInlierEstimator::Options nfaopts;
+        nfaopts.num_samples = corresp.size();
+        nfaopts.model_samples = 3;
+        nfaopts.model_outcomes = 4;
+        nfaopts.error_dimension = 2;
+        nfaopts.alpha0 = MATH_PI;
+        NFAInlierEstimator nfa(nfaopts);
+
+        double best_nfa = std::numeric_limits<double>::max();
         std::vector<int> inliers;
         inliers.reserve(corresp.size());
 #pragma omp for
@@ -56,11 +64,13 @@ RansacPoseP3P::estimate (Correspondences2D3D const& corresp,
             /* Check all putative solutions and count inliers. */
             for (std::size_t j = 0; j < poses.size(); ++j)
             {
-                this->find_inliers(corresp, k_matrix, poses[j], &inliers);
+                double nfa_value = this->find_inliers(corresp, k_matrix,
+                    poses[j], nfa, &inliers);
 #pragma omp critical
-                if (inliers.size() > result->inliers.size())
+                if (nfa_value < best_nfa)
                 {
                     result->pose = poses[j];
+                    best_nfa = nfa_value;
                     std::swap(result->inliers, inliers);
                     inliers.reserve(corresp.size());
 
@@ -102,13 +112,13 @@ RansacPoseP3P::compute_p3p (Correspondences2D3D const& corresp,
         poses);
 }
 
-void
+double
 RansacPoseP3P::find_inliers (Correspondences2D3D const& corresp,
-    math::Matrix<double, 3, 3> const& k_matrix,
-    Pose const& pose, std::vector<int>* inliers) const
+    math::Matrix<double, 3, 3> const& k_matrix, Pose const& pose,
+    NFAInlierEstimator const& nfa, std::vector<int>* inliers) const
 {
     inliers->resize(0);
-    double const square_threshold = MATH_POW2(this->opts.threshold);
+    std::vector<double> errors;
     for (std::size_t i = 0; i < corresp.size(); ++i)
     {
         Correspondence2D3D const& c = corresp[i];
@@ -116,9 +126,9 @@ RansacPoseP3P::find_inliers (Correspondences2D3D const& corresp,
         math::Vec3d p2d = k_matrix * (pose * p3d);
         double square_error = MATH_POW2(p2d[0] / p2d[2] - c.p2d[0])
             + MATH_POW2(p2d[1] / p2d[2] - c.p2d[1]);
-        if (square_error < square_threshold)
-            inliers->push_back(i);
+        errors.emplace_back(std::sqrt(square_error));
     }
+    return nfa.estimate_inliers(errors, inliers);
 }
 
 SFM_NAMESPACE_END

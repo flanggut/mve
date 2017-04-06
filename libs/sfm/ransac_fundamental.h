@@ -14,6 +14,7 @@
 #include "sfm/defines.h"
 #include "sfm/correspondence.h"
 #include "sfm/fundamental.h"
+#include "sfm/nfa_inlier_estimator.h"
 
 SFM_NAMESPACE_BEGIN
 
@@ -40,12 +41,6 @@ public:
          * required number of iterations for a certain RANSAC success rate.
          */
         int max_iterations;
-
-        /**
-         * Threshold used to determine inliers. Defaults to 0.0015.
-         * This threshold assumes that the input points are normalized.
-         */
-        double threshold;
 
         /**
          * Produce status messages on the console.
@@ -75,8 +70,9 @@ public:
 private:
     void estimate_8_point (Correspondences2D2D const& matches,
         FundamentalMatrix* fundamental);
-    void find_inliers (Correspondences2D2D const& matches,
-        FundamentalMatrix const& fundamental, std::vector<int>* result);
+    double find_inliers (Correspondences2D2D const& matches,
+        FundamentalMatrix const& fundamental, NFAInlierEstimator const& nfa,
+        std::vector<int>* result);
 
 private:
     Options opts;
@@ -87,7 +83,6 @@ private:
 inline
 RansacFundamental::Options::Options (void)
     : max_iterations(1000)
-    , threshold(0.0015)
     , verbose_output(false)
 {
 }

@@ -29,18 +29,27 @@ RansacFundamental::estimate (Correspondences2D2D const& matches, Result* result)
     if (this->opts.verbose_output)
     {
         std::cout << "RANSAC-F: Running for " << this->opts.max_iterations
-            << " iterations, threshold " << this->opts.threshold
-            << "..." << std::endl;
+            << " iterations " << "..." << std::endl;
     }
 
+    NFAInlierEstimator::Options nfaopts;
+    nfaopts.num_samples = matches.size();
+    nfaopts.model_samples = 8;
+    nfaopts.model_outcomes = 1;
+    nfaopts.error_dimension = 1;
+    nfaopts.alpha0 = 2.0 * std::sqrt(2);
+    NFAInlierEstimator nfa(nfaopts);
+
+    double best_nfa = std::numeric_limits<double>::max();
     std::vector<int> inliers;
     inliers.reserve(matches.size());
     for (int iteration = 0; iteration < this->opts.max_iterations; ++iteration)
     {
         FundamentalMatrix fundamental;
         this->estimate_8_point(matches, &fundamental);
-        this->find_inliers(matches, fundamental, &inliers);
-        if (inliers.size() > result->inliers.size())
+        double nfa_value = this->find_inliers(matches, fundamental, nfa,
+            &inliers);
+        if (nfa_value < best_nfa)
         {
             if (this->opts.verbose_output)
             {
@@ -50,6 +59,7 @@ RansacFundamental::estimate (Correspondences2D2D const& matches, Result* result)
                     << "%)" << std::endl;
             }
 
+            best_nfa = nfa_value;
             result->fundamental = fundamental;
             std::swap(result->inliers, inliers);
             inliers.reserve(matches.size());
@@ -90,18 +100,19 @@ RansacFundamental::estimate_8_point (Correspondences2D2D const& matches,
     sfm::enforce_fundamental_constraints(fundamental);
 }
 
-void
+double
 RansacFundamental::find_inliers (Correspondences2D2D const& matches,
-    FundamentalMatrix const& fundamental, std::vector<int>* result)
+    FundamentalMatrix const& fundamental, NFAInlierEstimator const& nfa,
+    std::vector<int>* inliers)
 {
-    result->resize(0);
-    double const squared_thres = this->opts.threshold * this->opts.threshold;
+    inliers->resize(0);
+    std::vector<double> errors;
     for (std::size_t i = 0; i < matches.size(); ++i)
     {
         double error = sampson_distance(fundamental, matches[i]);
-        if (error < squared_thres)
-            result->push_back(i);
+        errors.emplace_back(std::sqrt(error));
     }
+    return nfa.estimate_inliers(errors, inliers);
 }
 
 SFM_NAMESPACE_END

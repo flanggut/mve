@@ -16,6 +16,7 @@
 #include "math/vector.h"
 #include "sfm/correspondence.h"
 #include "sfm/defines.h"
+#include "sfm/nfa_inlier_estimator.h"
 
 SFM_NAMESPACE_BEGIN
 
@@ -49,12 +50,6 @@ public:
         int max_iterations;
 
         /**
-         * Threshold used to determine inliers. Defaults to 0.005.
-         * This threshold assumes that the input points are normalized.
-         */
-        double threshold;
-
-        /**
          * Produce status messages on the console.
          */
         bool verbose_output;
@@ -85,9 +80,10 @@ private:
         math::Matrix<double, 3, 3> const& inv_k_matrix,
         PutativePoses* poses) const;
 
-    void find_inliers (Correspondences2D3D const& corresp,
+    double find_inliers (Correspondences2D3D const& corresp,
         math::Matrix<double, 3, 3> const& k_matrix,
-        Pose const& pose, std::vector<int>* inliers) const;
+        Pose const& pose, NFAInlierEstimator const& nfa,
+        std::vector<int>* inliers) const;
 
 private:
     Options opts;
@@ -98,7 +94,6 @@ private:
 inline
 RansacPoseP3P::Options::Options (void)
     : max_iterations(1000)
-    , threshold(0.005)
     , verbose_output(false)
 {
 }

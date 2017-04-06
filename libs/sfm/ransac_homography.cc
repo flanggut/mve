@@ -30,18 +30,27 @@ RansacHomography::estimate (Correspondences2D2D const& matches, Result* result)
     if (this->opts.verbose_output)
     {
         std::cout << "RANSAC-H: Running for " << this->opts.max_iterations
-            << " iterations, threshold " << this->opts.threshold
-            << "..." << std::endl;
+            << " iterations " << "..." << std::endl;
     }
 
+    NFAInlierEstimator::Options nfaopts;
+    nfaopts.num_samples = matches.size();
+    nfaopts.model_samples = 4;
+    nfaopts.model_outcomes = 1;
+    nfaopts.error_dimension = 2;
+    nfaopts.alpha0 = MATH_PI;
+    NFAInlierEstimator nfa(nfaopts);
+
+    double best_nfa = std::numeric_limits<double>::max();
     std::vector<int> inliers;
     inliers.reserve(matches.size());
     for (int iteration = 0; iteration < this->opts.max_iterations; ++iteration)
     {
         HomographyMatrix homography;
         this->compute_homography(matches, &homography);
-        this->evaluate_homography(matches, homography, &inliers);
-        if (inliers.size() > result->inliers.size())
+        double nfa_value = this->evaluate_homography(matches, homography, nfa,
+            &inliers);
+        if (nfa_value < best_nfa)
         {
             if (this->opts.verbose_output)
             {
@@ -51,6 +60,7 @@ RansacHomography::estimate (Correspondences2D2D const& matches, Result* result)
                     << "%)" << std::endl;
             }
 
+            best_nfa = nfa_value;
             result->homography = homography;
             std::swap(result->inliers, inliers);
             inliers.reserve(matches.size());
@@ -82,19 +92,20 @@ RansacHomography::compute_homography (Correspondences2D2D const& matches,
     *homography /= (*homography)[8];
 }
 
-void
+double
 RansacHomography::evaluate_homography (Correspondences2D2D const& matches,
-    HomographyMatrix const& homography, std::vector<int>* inliers)
+    HomographyMatrix const& homography, NFAInlierEstimator const& nfa,
+    std::vector<int>* inliers)
 {
-    double const square_threshold = MATH_POW2(this->opts.threshold);
     inliers->resize(0);
+    std::vector<double> errors;
     for (std::size_t i = 0; i < matches.size(); ++i)
     {
         Correspondence2D2D const& match = matches[i];
         double error = sfm::symmetric_transfer_error(homography, match);
-        if (error < square_threshold)
-            inliers->push_back(i);
+        errors.emplace_back(std::sqrt(error));
     }
+    return nfa.estimate_inliers(errors, inliers);
 }
 
 SFM_NAMESPACE_END

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "sfm/homography.h"
+#include "sfm/nfa_inlier_estimator.h"
 
 SFM_NAMESPACE_BEGIN
 
@@ -37,12 +38,6 @@ public:
          * required number of iterations for a certain RANSAC success rate.
          */
         int max_iterations;
-
-        /**
-         * Threshold used to determine inliers. Defaults to 0.005.
-         * This threshold assumes that the input points are normalized.
-         */
-        double threshold;
 
         /**
          * Produce status messages on the console.
@@ -72,8 +67,9 @@ public:
 private:
     void compute_homography (Correspondences2D2D const& matches,
         HomographyMatrix* homography);
-    void evaluate_homography (Correspondences2D2D const& matches,
-        HomographyMatrix const& homography, std::vector<int>* inliers);
+    double evaluate_homography (Correspondences2D2D const& matches,
+        HomographyMatrix const& homography, NFAInlierEstimator const& nfa,
+        std::vector<int>* inliers);
 
 private:
     Options opts;
@@ -84,7 +80,6 @@ private:
 inline
 RansacHomography::Options::Options (void)
     : max_iterations(1000)
-    , threshold(0.005)
     , verbose_output(false)
 {
 }
