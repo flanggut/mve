@@ -373,6 +373,7 @@ Incremental::bundle_adjustment_intern (int single_camera_ba)
 {
     ba::BundleAdjustment::Options ba_opts;
     ba_opts.fixed_intrinsics = this->opts.ba_fixed_intrinsics;
+    ba_opts.use_huber_loss = this->opts.ba_huber_loss;
     ba_opts.verbose_output = this->opts.verbose_ba;
     if (single_camera_ba >= 0)
         ba_opts.bundle_mode = ba::BundleAdjustment::BA_CAMERAS;

@@ -50,6 +50,7 @@ struct AppSettings
     bool normalize_scene = false;
     bool skip_sfm = false;
     bool always_full_ba = false;
+    bool ba_huber_loss = false;
     bool fixed_intrinsics = false;
     //bool shared_intrinsics = false;
     bool intrinsics_from_views = false;
@@ -298,6 +299,7 @@ sfm_reconstruct (AppSettings const& conf)
     incremental_opts.track_error_threshold_factor = conf.track_error_thres_factor;
     incremental_opts.new_track_error_threshold = conf.new_track_error_thres;
     incremental_opts.min_triangulation_angle = MATH_DEG2RAD(1.0);
+    incremental_opts.ba_huber_loss = conf.ba_huber_loss;
     incremental_opts.ba_fixed_intrinsics = conf.fixed_intrinsics;
     //incremental_opts.ba_shared_intrinsics = conf.shared_intrinsics;
     incremental_opts.verbose_output = true;
@@ -496,6 +498,8 @@ main (int argc, char** argv)
     args.add_option('\0', "no-prediction", false, "Disable matchability prediction");
     args.add_option('\0', "normalize", false, "Normalize scene after reconstruction");
     args.add_option('\0', "skip-sfm", false, "Compute prebundle, skip SfM reconstruction");
+    args.add_option('\0', "huber-loss", false, "Use robust huber loss for "
+        "bundle adjustment");
     args.add_option('\0', "always-full-ba", false, "Run full bundle adjustment after every view");
     args.add_option('\0', "video-matching", true, "Only match to ARG previous frames [0]");
     args.add_option('\0', "fixed-intrinsics", false, "Do not optimize camera intrinsics");
@@ -537,6 +541,8 @@ main (int argc, char** argv)
             conf.normalize_scene = true;
         else if (i->opt->lopt == "skip-sfm")
             conf.skip_sfm = true;
+        else if (i->opt->lopt == "huber-loss")
+            conf.ba_huber_loss = true;
         else if (i->opt->lopt == "always-full-ba")
             conf.always_full_ba = true;
         else if (i->opt->lopt == "video-matching")

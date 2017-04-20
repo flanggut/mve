@@ -66,6 +66,7 @@ public:
         BAMode bundle_mode;
         bool fixed_intrinsics;
         //bool shared_intrinsics;
+        bool use_huber_loss;
         int lm_max_iterations;
         int lm_min_iterations;
         double lm_delta_threshold;
@@ -113,7 +114,7 @@ private:
 
     /* Analytic Jacobian. */
     void analytic_jacobian (SparseMatrixType* jac_cam,
-        SparseMatrixType* jac_points);
+        SparseMatrixType* jac_points, DenseVectorType* F);
     void analytic_jacobian_entries (Camera const& cam, Point3D const& point,
         double* cam_x_ptr, double* cam_y_ptr,
         double* point_x_ptr, double* point_y_ptr);
@@ -139,6 +140,7 @@ inline
 BundleAdjustment::Options::Options (void)
     : verbose_output(false)
     , bundle_mode(BA_CAMERAS_AND_POINTS)
+    , use_huber_loss(false)
     , lm_max_iterations(50)
     , lm_min_iterations(0)
     , lm_delta_threshold(1e-4)

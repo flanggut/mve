@@ -39,6 +39,8 @@ public:
         double new_track_error_threshold;
         /** Minimum angle for track triangulation in RAD. */
         double min_triangulation_angle;
+        /** Bundle Adjustment use robust huber loss. */
+        bool ba_huber_loss;
         /** Bundle Adjustment fixed intrinsics. */
         bool ba_fixed_intrinsics;
         /** Bundle Adjustment with shared intrinsics. */
@@ -109,6 +111,7 @@ Incremental::Options::Options (void)
     : track_error_threshold_factor(10.0)
     , new_track_error_threshold(0.01)
     , min_triangulation_angle(MATH_DEG2RAD(1.0))
+    , ba_huber_loss(false)
     , ba_fixed_intrinsics(false)
     , ba_shared_intrinsics(false)
     , verbose_output(false)

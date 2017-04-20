@@ -99,13 +99,13 @@ BundleAdjustment::lm_optimize (void)
         switch (this->opts.bundle_mode)
         {
             case BA_CAMERAS_AND_POINTS:
-                this->analytic_jacobian(&Jc, &Jp);
+                this->analytic_jacobian(&Jc, &Jp, &F);
                 break;
             case BA_CAMERAS:
-                this->analytic_jacobian(&Jc, nullptr);
+                this->analytic_jacobian(&Jc, nullptr, &F);
                 break;
             case BA_POINTS:
-                this->analytic_jacobian(nullptr, &Jp);
+                this->analytic_jacobian(nullptr, &Jp, &F);
                 break;
             default:
                 throw std::runtime_error("Invalid bundle mode");
@@ -265,12 +265,51 @@ BundleAdjustment::compute_reprojection_errors (DenseVectorType* vector_f,
     }
 }
 
+/**
+ * Robust huber loss
+ * This can potentially also be replaced by any loss function using
+ * the following definitions:
+ *
+ * residual: the squared norm of the error of one observation
+ * rho: to be filled with 3 values
+ *      rho[0] = the value of the loss function given the residual
+ *      rho[1] = the first derivative of the loss at the residual
+ *      rho[2] = the second derivative of the loss at the residual
+ */
+void
+huber_loss (double residual, double* rho, double scale = 0.0005)
+{
+    double scale2 = scale * scale;
+    if (residual > scale2) {
+        // Outlier
+        double const r = std::sqrt(residual);
+        rho[0] = 2.0 * scale * r - scale2;
+        rho[1] = std::max(std::numeric_limits<double>::min(), scale / r);
+        rho[2] = - rho[1] / (2.0 * residual);
+    } else {
+        // Inlier
+        rho[0] = residual;
+        rho[1] = 1.0;
+        rho[2] = 0.0;
+    }
+}
+
 double
 BundleAdjustment::compute_mse (DenseVectorType const& vector_f)
 {
     double mse = 0.0;
-    for (std::size_t i = 0; i < vector_f.size(); ++i)
-        mse += vector_f[i] * vector_f[i];
+    double rho[3];
+    for (std::size_t i = 0; i < vector_f.size(); i += 2)
+    {
+        double residual = vector_f[i] * vector_f[i]
+            + vector_f[i + 1] * vector_f[i + 1];
+        if (this->opts.use_huber_loss)
+        {
+            huber_loss(residual, rho);
+            residual = rho[0];
+        }
+        mse += residual;
+    }
     return mse / static_cast<double>(vector_f.size() / 2);
 }
 
@@ -303,9 +342,81 @@ BundleAdjustment::rodrigues_to_matrix (double const* r, double* m)
     m[8] = 1.0 - (r[0] * r[0] + r[1] * r[1]) * ct;
 }
 
+/**
+ * Correct residual and jacobian for robust huber loss
+ *
+ * Adapted from Ceres Solver and
+ *   "Bundle Adjustment - A Modern Synthesis"
+ *   Bill Triggs et al., 1999, p17
+ */
+void
+correct_error_and_jacobian_huber (double* F, double* cam_x_ptr,
+    double* cam_y_ptr, double* point_x_ptr, double* point_y_ptr)
+{
+    double residual_sqnorm = MATH_POW2(F[0]) + MATH_POW2(F[1]);
+    math::Vec3d rho;
+    huber_loss(residual_sqnorm, *rho);
+    double sqrt_rho1 = std::sqrt(rho[1]);
+    double residual_scale;
+    double alpha_div_norm;
+    if ((residual_sqnorm == 0.0) || (rho[2] <= 0.0))
+    {
+        residual_scale = sqrt_rho1;
+        alpha_div_norm = 0.0;
+    }
+    else
+    {
+        // Calculate the smaller of the two solutions to the equation
+        // 0.5 *  alpha^2 - alpha - rho'' / rho' *  r dot r = 0.
+        const double D = 1.0 + 2.0 * residual_sqnorm * rho[2] / rho[1];
+        const double alpha = 1.0 - std::sqrt(D);
+        residual_scale = sqrt_rho1 / (1 - alpha);
+        alpha_div_norm = alpha / residual_sqnorm;
+    }
+
+    if (alpha_div_norm == 0.0)
+    {
+        for (int c = 0; c < 9; ++c)
+        {
+            cam_x_ptr[c] *= sqrt_rho1;
+            cam_y_ptr[c] *= sqrt_rho1;
+        }
+        for (int c = 0; c < 3; ++c)
+        {
+            point_x_ptr[c] *= sqrt_rho1;
+            point_y_ptr[c] *= sqrt_rho1;
+        }
+    }
+    else
+    {
+        for (int c = 0; c < 9; ++c)
+        {
+            double r_transpose_J = cam_x_ptr[c] * F[0]
+                + cam_y_ptr[c] * F[1];
+
+            cam_x_ptr[c] = sqrt_rho1 * (cam_x_ptr[c] - alpha_div_norm *
+                F[0] * r_transpose_J);
+            cam_y_ptr[c] = sqrt_rho1 * (cam_y_ptr[c] - alpha_div_norm *
+                F[1] * r_transpose_J);
+        }
+        for (int c = 0; c < 3; ++c)
+        {
+            double r_transpose_J = point_x_ptr[c] * F[0]
+                + point_y_ptr[c] * F[1];
+
+            point_x_ptr[c] = sqrt_rho1 * (point_x_ptr[c] - alpha_div_norm *
+                F[0] * r_transpose_J);
+            point_y_ptr[c] = sqrt_rho1 * (point_y_ptr[c] - alpha_div_norm *
+                F[1] * r_transpose_J);
+        }
+    }
+    F[0] = F[0] * residual_scale;
+    F[1] = F[1] * residual_scale;
+}
+
 void
 BundleAdjustment::analytic_jacobian (SparseMatrixType* jac_cam,
-    SparseMatrixType* jac_points)
+    SparseMatrixType* jac_points, DenseVectorType* F)
 {
     std::size_t const camera_cols = this->cameras->size()
         * this->num_cam_params;
@@ -338,6 +449,11 @@ BundleAdjustment::analytic_jacobian (SparseMatrixType* jac_cam,
             }
 
             std::size_t row_x = i * 2, row_y = row_x + 1;
+
+            if (this->opts.use_huber_loss)
+                correct_error_and_jacobian_huber(&F->at(row_x), cam_x_ptr,
+                    cam_y_ptr, point_x_ptr, point_y_ptr);
+
             std::size_t cam_col = obs.camera_id * this->num_cam_params;
             std::size_t point_col = obs.point_id * 3;
             std::size_t cam_offset = i * this->num_cam_params * 2;
