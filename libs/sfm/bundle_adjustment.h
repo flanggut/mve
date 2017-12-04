@@ -130,6 +130,8 @@ private:
     std::vector<Camera>* cameras;
     std::vector<Point3D>* points;
     std::vector<Observation>* observations;
+    DenseVectorType jac_cams_scale;
+    DenseVectorType jac_points_scale;
     int const num_cam_params;
 };
 

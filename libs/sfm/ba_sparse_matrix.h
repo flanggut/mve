@@ -51,6 +51,7 @@ public:
     void mult_diagonal (T const& factor);
     void cwise_invert (void);
     void column_nonzeros (std::size_t col, DenseVector<T>* vector) const;
+    void scale_columns(DenseVector<T> const& vector);
 
     SparseMatrix transpose (void) const;
     SparseMatrix subtract (SparseMatrix const& rhs) const;
@@ -464,6 +465,19 @@ SparseMatrix<T>::column_nonzeros (std::size_t col, DenseVector<T>* vector) const
     vector->resize(end - start);
     for (std::size_t row = start, i = 0; row < end; ++row, ++i)
         vector->at(i) = this->values[row];
+}
+
+template<typename T>
+void
+SparseMatrix<T>::scale_columns (DenseVector<T> const& vector)
+{
+    for (std::size_t col = 0; col < this->cols; ++col)
+    {
+        std::size_t const start = this->outer[col];
+        std::size_t const end = this->outer[col + 1];
+        for (std::size_t row = start, i = 0; row < end; ++row, ++i)
+            this->values[row] *= vector.at(col);
+    }
 }
 
 template<typename T>

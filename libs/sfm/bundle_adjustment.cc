@@ -111,10 +111,48 @@ BundleAdjustment::lm_optimize (void)
                 throw std::runtime_error("Invalid bundle mode");
         }
 
+        /*
+         * Scale Jacobian to improve condition number of linear system.
+         * We scale all columns of J which is equivalent to multiplying
+         * with a diagonal matrix S. So instead of the regular system
+         * JtJ x = -JtF
+         * We solve for
+         * SJtJS x' = -SJtF
+         * And get the solution
+         * x' = (SJtJS)^-1 * -SJtF
+         *    = S^-1 (JtJ)^-1 * JtF == S^-1 x
+         * To get the solution x for the unscaled system we just need
+         * to multiply x' with S.
+         */
+        if (lm_iter == 0) {
+            /* It's sufficient to compute the scaling only in first iteration */
+            DenseVectorType col;
+            this->jac_cams_scale.resize(Jc.num_cols());
+            for (std::size_t i = 0; i < Jc.num_cols(); ++i)
+            {
+                Jc.column_nonzeros(i, &col);
+                this->jac_cams_scale[i] = 1.0 / (1.0 + col.norm());
+            }
+            this->jac_points_scale.resize(Jp.num_cols());
+            for (std::size_t i = 0; i < Jp.num_cols(); ++i)
+            {
+                Jp.column_nonzeros(i, &col);
+                this->jac_points_scale[i] = 1.0 / (1.0 + col.norm());
+            }
+        }
+        Jc.scale_columns(jac_cams_scale);
+        Jp.scale_columns(jac_points_scale);
+
         /* Perform linear step. */
         DenseVectorType delta_x;
         LinearSolver pcg(pcg_opts);
         LinearSolver::Status cg_status = pcg.solve(Jc, Jp, F, &delta_x);
+
+        /* Undo Jacobian scaling */
+        for (std::size_t i = 0; i < Jc.num_cols(); ++i)
+            delta_x[i] *= jac_cams_scale[i];
+        for (std::size_t i = 0; i < Jp.num_cols(); ++i)
+            delta_x[Jc.num_cols() + i] *= jac_points_scale[i];
 
         /* Update reprojection errors and MSE after linear step. */
         double new_mse, delta_mse, delta_mse_ratio = 1.0;
