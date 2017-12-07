@@ -133,7 +133,7 @@ Incremental::reconstruct_next_view (int view_id)
     }
 
     /* Cancel if inliers are below a 33% threshold. */
-    if (3 * ransac_result.inliers.size() < corr.size())
+    if (5 * ransac_result.inliers.size() < corr.size())
     {
         if (this->opts.verbose_output)
             std::cout << "Only " << ransac_result.inliers.size()
@@ -625,8 +625,8 @@ Incremental::invalidate_large_error_tracks (void)
     std::size_t const nth_position = all_errors.size() / 2;
     std::nth_element(all_errors.begin(),
         all_errors.begin() + nth_position, all_errors.end());
-    double const square_threshold = all_errors[nth_position].first
-        * this->opts.track_error_threshold_factor;
+    double const square_threshold = std::max(all_errors[nth_position].first
+        * this->opts.track_error_threshold_factor, MATH_POW2(0.0015));
 
     /* Delete all tracks with errors above the threshold. */
     int num_deleted_tracks = 0;

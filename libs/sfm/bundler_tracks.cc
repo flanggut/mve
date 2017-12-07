@@ -9,6 +9,7 @@
 
 #include <iostream>
 #include <set>
+#include <map>
 
 #include "mve/image_tools.h"
 #include "mve/image_drawing.h"
@@ -141,6 +142,20 @@ Tracks::compute (PairwiseMatching const& matching,
         track.color[0] = static_cast<uint8_t>(color[0] / color[3] + 0.5f);
         track.color[1] = static_cast<uint8_t>(color[1] / color[3] + 0.5f);
         track.color[2] = static_cast<uint8_t>(color[2] / color[3] + 0.5f);
+    }
+    
+    std::map<int, std::size_t> track_stats;
+    for (auto & track : *tracks)
+    {
+      int size = track.features.size();
+      track_stats[size] += 1;
+    }
+    
+    std::cout << "Track stats: " << std::endl;
+    std::cout << " Total #: " << tracks->size() << std::endl;
+    for (auto & stat : track_stats)
+    {
+      std::cout << "  " << stat.first << " " << stat.second << std::endl;
     }
 }
 

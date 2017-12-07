@@ -382,6 +382,9 @@ sfm_reconstruct (AppSettings const& conf)
             std::cout << "Running full bundle adjustment..." << std::endl;
             incremental.bundle_adjustment_full();
             incremental.invalidate_large_error_tracks();
+            incremental.triangulate_new_tracks(conf.min_views_per_track);
+            incremental.bundle_adjustment_full();
+            incremental.invalidate_large_error_tracks();
             full_ba_num_skipped = 0;
         }
     }

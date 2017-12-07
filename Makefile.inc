@@ -13,7 +13,13 @@ CXXFLAGS += -pthread
 
 UNAME = $(shell uname)
 ifeq (${UNAME},Darwin)
-    OPENMP =
+    LLVM = /usr/local/opt/llvm
+    ifeq ($(wildcard ${LLVM}/bin/clang++),)
+        OPENMP =
+    else
+        CXX = ${LLVM}/bin/clang++
+        LDFLAGS += -L${LLVM}/lib -Wl,-rpath,${LLVM}lib
+    endif
 endif
 
 COMPILE.cc = ${CXX} ${CXXFLAGS} ${CPPFLAGS} -c
