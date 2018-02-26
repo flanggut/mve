@@ -11,6 +11,7 @@
 #include <QIcon>
 #include <QPushButton>
 #include <QApplication>
+#include <QtOpenGL>
 
 #include "mve/image.h"
 #include "mve/image_tools.h"
@@ -117,21 +118,15 @@ AddinRephotographer::on_rephoto_view (mve::View::Ptr view)
 
     /* Re-photograph. */
     this->request_context();
+
+    QOpenGLFramebufferObjectFormat format;
+    format.setAttachment(QOpenGLFramebufferObject::Depth);
+    QOpenGLFramebufferObject* fbo =
+      new QOpenGLFramebufferObject(width, height, format);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo->handle());
     glViewport(0, 0, width, height);
-    GLuint framebuffer;
-    glGenFramebuffers(1, &framebuffer);
-    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-    GLuint renderbuffer[2];
-    glGenRenderbuffers(2, renderbuffer);
-    glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer[0]);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_RGB, width, height);
-    glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer[1]);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, width, height);
-    glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-        GL_RENDERBUFFER, renderbuffer[0]);
-    glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-        GL_RENDERBUFFER, renderbuffer[1]);
-    this->repaint();
+
+    this->state->gl_widget->repaint_gl();
 
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
 
@@ -146,9 +141,9 @@ AddinRephotographer::on_rephoto_view (mve::View::Ptr view)
         GL_FLOAT, depth->begin());
     mve::image::flip<float>(depth, mve::image::FLIP_VERTICAL);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glDeleteRenderbuffers(2, renderbuffer);
-    glDeleteFramebuffers(1, &framebuffer);
+    fbo->bindDefault();
+    fbo->release();
+    delete fbo;
 
     /* Restore camera and viewport */
     *this->camera = camera_backup;

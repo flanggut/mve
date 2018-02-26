@@ -78,6 +78,7 @@ GLWidget::sizeHint() const
 inline void
 GLWidget::repaint_gl (void)
 {
+    paintGL();
 }
 
 inline void
