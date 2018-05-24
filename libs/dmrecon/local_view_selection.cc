@@ -141,7 +141,7 @@ LocalViewSelection::performVS()
             available[maxView] = false;
         }
     }
-    if (selected.size() == settings.nrReconNeighbors) {
+    if (selected.size() >= 1) {
         success = true;
     }
 }
