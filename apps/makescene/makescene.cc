@@ -28,6 +28,7 @@
 #include "math/matrix.h"
 #include "math/matrix_tools.h"
 #include "math/algo.h"
+#include "math/quaternion.h"
 #include "util/system.h"
 #include "util/timer.h"
 #include "util/arguments.h"
@@ -70,6 +71,7 @@ struct AppSettings
     bool images_only = false;
     bool append_images = false;
     int max_pixels = std::numeric_limits<int>::max();
+    std::string colmap_calibration_path;
 
     /* Computed values. */
     std::string bundle_path;
@@ -329,6 +331,192 @@ make_image_name (int id)
 {
     return "view_" + util::string::get_filled(id, 4) + ".mve";
 }
+
+/* ---------------------------------------------------------------- */
+
+void import_bundle_colmap (AppSettings const& conf)
+{
+    /* Create output directories. */
+    std::cout << "Creating output directories..." << std::endl;
+    util::fs::mkdir(conf.output_path.c_str());
+    util::fs::mkdir(conf.views_path.c_str());
+
+    std::string cams_file = conf.colmap_calibration_path + "/cameras.txt";
+    std::string imgs_file = conf.colmap_calibration_path + "/images.txt";
+    std::string pts_file = conf.colmap_calibration_path + "/points3D.txt";
+
+    mve::Bundle::Ptr bundle = mve::Bundle::create();
+
+    // Read camera intrinsics
+    std::ifstream in_cams(cams_file, std::ios_base::in);
+    if (!in_cams.good())
+        throw util::FileException(cams_file, std::strerror(errno));
+
+    std::map<int, mve::CameraInfo> colmap_cams;
+    while (in_cams.good())
+    {
+        std::string line;
+        std::getline(in_cams, line);
+        // Skip empty lines and comments.
+        if (line.empty() || line[0] == '#')
+            continue;
+
+        std::stringstream stream(line);
+        int id;
+        stream >> id;
+        std::string type;
+        stream >> type;
+
+        float width, height;
+        stream >> width;
+        stream >> height;
+
+        mve::CameraInfo cam;
+        stream >> cam.flen;
+        if (type != "SIMPLE_PINHOLE" && type != "SIMPLE_RADIAL")
+        {
+            float flen;
+            stream >> flen;
+            cam.paspect = cam.flen / flen;
+        }
+        cam.flen /= std::max(width, height);
+
+        float ppoint_x, ppoint_y;
+        stream >> ppoint_x;
+        cam.ppoint[0] = ppoint_x / width;
+        stream >> ppoint_y;
+        cam.ppoint[1] = ppoint_y / height;
+
+        float dummy;
+        while(stream.good())
+            stream >> dummy;
+
+        colmap_cams[id] = cam;
+    }
+
+    // Read features
+    std::ifstream in_points(pts_file, std::ios_base::in);
+    if (!in_points.good())
+        throw util::FileException(pts_file, std::strerror(errno));
+
+    mve::Bundle::Features& features = bundle->get_features();
+    while (in_points.good())
+    {
+        std::string line;
+        std::getline(in_points, line);
+        // Skip empty lines and comments.
+        if (line.empty() || line[0] == '#')
+            continue;
+
+        std::stringstream stream(line);
+        int dummy_id;
+        stream >> dummy_id;
+
+        mve::Bundle::Feature3D feature;
+        stream >> feature.pos[0] >> feature.pos[1] >> feature.pos[2];
+        stream >> feature.color[0] >> feature.color[1] >> feature.color[2];
+        for (int j = 0; j < 3; ++j)
+            feature.color[j] /= 255.0f;
+
+        float error;
+        stream >> error;
+
+        // COLMAP can have multiple refs per view O_o
+        std::map<int, int> track;
+        while(stream.good())
+        {
+            int view_id, feature_id;
+            stream >> view_id >> feature_id;
+            track[view_id] = feature_id;
+        }
+        feature.refs.reserve(track.size());
+
+        for (auto const& track_ref : track)
+        {
+            mve::Bundle::Feature2D ref;
+            ref.view_id = track_ref.first;
+            ref.feature_id = track_ref.second;
+            feature.refs.push_back(ref);
+        }
+        features.push_back(feature);
+    }
+
+    std::ifstream in_images(imgs_file, std::ios_base::in);
+    if (!in_images.good())
+        throw util::FileException(imgs_file, std::strerror(errno));
+
+    // Read Views
+    std::cout << "Writing MVE views..." << std::endl;
+    std::map<int, mve::CameraInfo> cameras;
+    int max_view_id = 0;
+    while (in_images.good())
+    {
+        std::string line;
+        std::getline(in_images, line);
+        // Skip empty lines and comments.
+        if (line.empty() || line[0] == '#')
+            continue;
+
+        std::stringstream stream(line);
+        int view_id;
+        stream >> view_id;
+        max_view_id = std::max(max_view_id, view_id);
+
+        mve::CameraInfo cam;
+        math::Quat4f quat;
+        stream >> quat[0] >> quat[1] >> quat[2] >> quat[3];
+        quat.to_rotation_matrix(cam.rot);
+        stream >> cam.trans[0] >> cam.trans[1] >> cam.trans[2];
+
+        int intrinsics_id;
+        stream >> intrinsics_id;
+        cam.flen = colmap_cams[intrinsics_id].flen;
+        cam.ppoint[0] = colmap_cams[intrinsics_id].ppoint[0];
+        cam.ppoint[1] = colmap_cams[intrinsics_id].ppoint[1];
+        cam.paspect = colmap_cams[intrinsics_id].paspect;
+
+        std::string image_name;
+        stream >> image_name;
+        image_name = util::fs::basename(image_name);
+
+        mve::View::Ptr view = mve::View::create();
+        view->set_id(view_id);
+        view->set_name(image_name);
+
+        std::string fname = "view_" + util::string::get_filled(view_id, 4, '0') + ".mve";
+        std::string exif;
+        std::string image_path = util::fs::join_path(conf.input_path, image_name);
+        mve::ByteImage::Ptr image = load_8bit_image(image_path, &exif);
+        if (image == nullptr)
+        {
+            std::cout << "Error loading: " << image_path
+                << " (skipping " << fname << ")" << std::endl;
+            continue;
+        }
+        view->set_image(image, "undistorted");
+        view->set_image(create_thumbnail(image), "thumbnail");
+        view->set_camera(cam);
+
+        std::cout << "Writing MVE view: " << fname << "..." << std::endl;
+        view->save_view_as(util::fs::join_path(conf.views_path, fname));
+        cameras[view_id] = cam;
+
+        // Read features but do not import
+        std::getline(in_images, line);
+    }
+    mve::Bundle::Cameras& bundle_cams = bundle->get_cameras();
+    bundle_cams.reserve(max_view_id);
+    for(int i = 0; i < max_view_id; ++i)
+        bundle_cams.push_back(cameras[i]);
+
+    std::cout << "Writing bundle file..." << std::endl;
+    std::string bundle_filename
+        = util::fs::join_path(conf.output_path, "synth_0.out");
+    mve::save_mve_bundle(bundle, bundle_filename);
+
+    std::cout << std::endl << "Done importing COLMAP files!" << std::endl;
+}
+
 
 /* ---------------------------------------------------------------- */
 
@@ -735,6 +923,14 @@ is_noah_bundler_format (AppSettings const& conf)
     return util::fs::file_exists(bundle_fname.c_str());
 }
 
+bool
+is_colmap_bundle_format (AppSettings const& conf)
+{
+    std::string bundle_fname = util::fs::join_path(conf.colmap_calibration_path,
+        "points3D.txt");
+    return util::fs::file_exists(bundle_fname.c_str());
+}
+
 /* ---------------------------------------------------------------- */
 
 void
@@ -765,6 +961,17 @@ import_bundle (AppSettings const& conf)
     {
         std::cout << "Info: Detected Noah bundler format." << std::endl;
         import_bundle_noah_ps(conf);
+        return;
+    }
+
+    /**
+     * Try to detect COLMAP bundle format.
+     * In this case the input is multiple files "*.txt".
+     */
+    if (is_colmap_bundle_format(conf))
+    {
+        std::cout << "Info: Detected COLMAP bundle format." << std::endl;
+        import_bundle_colmap(conf);
         return;
     }
 
@@ -919,7 +1126,8 @@ main (int argc, char** argv)
     args.set_helptext_indent(22);
     args.set_description("This utility creates MVE scenes by importing "
         "from an external SfM software. Supported are Noah's Bundler, "
-        "Photosynther and VisualSfM's compact .nvm file.\n\n"
+        "Photosynther, VisualSfM's compact .nvm file, and"
+        "COLMAP calibration output.\n\n"
 
         "For VisualSfM, makescene expects the .nvm file as INPUT. "
         "With VisualSfM, it is not possible to keep invalid views.\n\n"
@@ -933,6 +1141,12 @@ main (int argc, char** argv)
         "With Photosynther, it is not possible to keep invalid views "
         "or import original images.\n\n"
 
+        "For COLMAP, makescene expects as INPUT the directory that "
+        "contains the undistorted images. The additional option "
+        "\"--colmap=PATH\" has to be used to select the directory"
+        "with the COLMAP calibration data as \"images.txt\", \"cameras.txt\""
+        "and \"points3D.txt\"\n\n"
+
         "With the \"images-only\" option, all images in the INPUT directory "
         "are imported without camera information. If \"append-images\" is "
         "specified, images are added to an existing scene.");
@@ -942,6 +1156,7 @@ main (int argc, char** argv)
     args.add_option('i', "images-only", false, "Imports images from INPUT_DIR only");
     args.add_option('a', "append-images", false, "Appends images to an existing scene");
     args.add_option('m', "max-pixels", true, "Limit image size by iterative half-sizing");
+    args.add_option('\0', "colmap", true, "Path for COLMAP calibration data");
     args.parse(argc, argv);
 
     /* Setup defaults. */
@@ -965,6 +1180,8 @@ main (int argc, char** argv)
             conf.append_images = true;
         else if (i->opt->lopt == "max-pixels")
             conf.max_pixels = i->get_arg<int>();
+        else if (i->opt->lopt == "colmap")
+            conf.colmap_calibration_path = i->arg;
         else
             throw std::invalid_argument("Unexpected option");
     }
@@ -977,6 +1194,8 @@ main (int argc, char** argv)
     }
     conf.views_path = util::fs::join_path(conf.output_path, VIEWS_DIR);
     conf.bundle_path = util::fs::join_path(conf.input_path, BUNDLE_PATH);
+    conf.colmap_calibration_path = util::fs::sanitize_path(
+        conf.colmap_calibration_path);
 
     if (conf.append_images && !conf.images_only)
     {
